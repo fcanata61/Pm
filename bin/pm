@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export BASH_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PM_LOG="${PM_LOG:-${BASH_SOURCE_DIR}/logs/pm-$(date +%Y%m%d-%H%M%S).log}"
+
+source "${BASH_SOURCE_DIR}/config.sh"
+source "${BASH_SOURCE_DIR}/lib/colors.sh"
+source "${BASH_SOURCE_DIR}/lib/log.sh"
+source "${BASH_SOURCE_DIR}/lib/spinner.sh"
+source "${BASH_SOURCE_DIR}/lib/net.sh"
+source "${BASH_SOURCE_DIR}/lib/archive.sh"
+source "${BASH_SOURCE_DIR}/lib/db.sh"
+source "${BASH_SOURCE_DIR}/lib/graph.sh"
+source "${BASH_SOURCE_DIR}/lib/build.sh"
+source "${BASH_SOURCE_DIR}/lib/install.sh"
+source "${BASH_SOURCE_DIR}/lib/revdep.sh"
+source "${BASH_SOURCE_DIR}/lib/repo.sh"
+source "${BASH_SOURCE_DIR}/lib/ui.sh"
+
+db_init
+
+cmd="${1:-}"; shift || true
+
+ensure_recipes(){
+  if [[ "${PM_RECIPE_DIR}" != "${BASH_SOURCE_DIR}/recipes" ]] && [[ ! -d "${PM_RECIPE_DIR}" ]]; then
+    die "PM_RECIPE_DIR não existe: ${PM_RECIPE_DIR}"
+  fi
+}
+
+do_fetch(){ ensure_recipes; for pkg in "$@"; do phase_fetch "$pkg"; done; }
+do_unpack(){ ensure_recipes; for pkg in "$@"; do phase_unpack "$pkg"; done; }
+do_patch(){ ensure_recipes; for pkg in "$@"; do phase_patch "$pkg"; done; }
+do_build(){ ensure_recipes; for pkg in "$@"; do phase_build "$pkg"; done; }
+do_install(){ ensure_recipes; for pkg in "$@"; do phase_install "$pkg"; done; }
+do_package(){ ensure_recipes; for pkg in "$@"; do make_package "$pkg"; done; }
+do_bininstall(){ ensure_recipes; for pkg in "$@"; do install_binary "$pkg"; done; }
+
+do_remove(){
+  ensure_recipes
+  local -a order=()
+  readarray -t order < <(topo_sort "$@" | reverse_order)
+  for p in "${order[@]}"; do
+    for h in "${PM_HOOKS_DIR}/post-remove.d/"*; do :; done # placeholder
+    remove_pkg "$p"
+    for h in "${PM_HOOKS_DIR}/post-remove.d/"*; do [[ -x "$h" ]] && "$h" "$p" || true; done
+  done
+}
+
+do_info(){
+  local pkg="$1"
+  local version="$(recipe_version "$pkg" 2>/dev/null || echo "N/A")"
+  local installed="$(db_installed_version "$pkg" || echo "")"
+  echo -e "${BLU}${pkg}${RST}"
+  echo "  versão receita : ${version}"
+  echo "  versão instalada: ${installed:-não instalada}"
+  echo "  deps:"
+  recipe_deps "$pkg" | sed 's/^/    - /'
+}
+
+do_search(){
+  local term="$1"
+  find "${PM_RECIPE_DIR}" -mindepth 1 -maxdepth 1 -type d -name "*${term}*" -printf "%f\n" | sort
+}
+
+do_list(){ db_list | awk -F'|' '{printf "%-20s %s\n",$1,$2}' | sort; }
+
+do_upgrade(){ upgrade_pkg "$1"; }
+
+do_revdep(){ revdep_check "$1"; }
+do_revdep_rebuild(){ revdep_rebuild "$1"; }
+
+case "${cmd}" in
+  fetch) do_fetch "$@" ;;
+  unpack) do_unpack "$@" ;;
+  patch) do_patch "$@" ;;
+  build) do_build "$@" ;;
+  install) do_install "$@" ;;
+  package) do_package "$@" ;;
+  bininstall) do_bininstall "$@" ;;
+  remove) do_remove "$@" ;;
+  info) do_info "$@" ;;
+  search) do_search "$@" ;;
+  list) do_list ;;
+  upgrade) do_upgrade "$@" ;;
+  revdep) do_revdep "$@" ;;
+  revdep-rebuild) do_revdep_rebuild "$@" ;;
+  repo) sub="${1:-}"; shift || true; [[ "$sub" == "sync" ]] && repo_sync || usage ;;
+  *|"") usage; exit 1 ;;
+esac
