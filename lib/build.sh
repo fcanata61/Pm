@@ -57,13 +57,19 @@ phase_build(){
   (cd "${PM_BUILD}/$pkg/src" && eval "$buildcmd")
 }
 
-phase_install(){
+phase_install() {
   local pkg="$1"
-  local version="$(recipe_version "$pkg")"
-  local dest="${PM_BUILD}/$pkg/dest"
-  mkdir -p "$dest"
-  (cd "${PM_BUILD}/$pkg/src" && make DESTDIR="$dest" install)
-  db_add "$pkg" "$version" "$dest" "$(recipe_deps "$pkg")"
+  local src="$2"
+  local dest="$3"
+
+  info "Instalando $pkg em $dest"
+  run_with_spinner "cd $src && $INSTALL" || die "Falha na instalação"
+
+  # Salva lista de arquivos instalados
+  local filelist="${PM_DB}/${pkg}.files"
+  (cd "$dest" && find . -type f -o -type l -o -type d) > "$filelist"
+
+  ok "Arquivos instalados registrados em $filelist"
 }
 
 make_package(){
