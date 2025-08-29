@@ -7,11 +7,9 @@ db_init(){
   [[ -f "$(db_file)" ]] || : >"$(db_file)"
 }
 
-db_add(){
+db_add() {
   local name="$1" version="$2" files="$3" deps="$4"
-  grep -vE "^${name}\|" "$(db_file)" > "$(db_file).tmp" 2>/dev/null || true
-  mv "$(db_file).tmp" "$(db_file)"
-  echo "${name}|${version}|${files}|${deps}" >>"$(db_file)"
+  echo "$name|$version|$files|$deps" >> "$(db_file)"
 }
 
 db_remove(){
